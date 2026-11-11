@@ -153,7 +153,7 @@ export function yearlySummary(pf, valued, today = new Date()) {
   const thisYear = today.getFullYear();
   const years = new Set([
     ...pf.buys.map((b) => b.year), ...pf.realized.map((r) => r.year),
-    ...pf.income.map((i) => i.year), ...pf.fees.map((f) => f.year), thisYear,
+    ...pf.income.map((i) => i.year), ...pf.fees.map((f) => f.year), ...(pf.taxYears || []), thisYear,
   ]);
   const minYear = Math.min(...years);
   const rows = [];
@@ -166,13 +166,17 @@ export function yearlySummary(pf, valued, today = new Date()) {
     const fees = sum(pf.fees);
     const invested = sum(pf.buys);
     const proceeds = sum(pf.realized, 'proceeds');
+    const cashAdded = sum(pf.cashFlows);
+    // A 1099 lists sales but not purchases. Without trade history for that year, buys are unknown.
+    const buysUnknown = !!pf.taxYears?.has(y) && invested === 0;
     rows.push({
-      year: y, invested, proceeds, netNew: invested - proceeds, realizedGain, shortTerm, longTerm, income, fees,
+      year: y, invested, proceeds, netNew: buysUnknown ? 0 : invested - proceeds, buysUnknown, cashAdded, realizedGain, shortTerm, longTerm, income, fees,
       net: realizedGain + income - fees,
+      source: pf.taxYears?.has(y) ? '1099' : 'Activity',
     });
   }
   const totals = rows.reduce((t, r) => {
-    for (const k of Object.keys(r)) if (k !== 'year') t[k] = (t[k] || 0) + r[k];
+    for (const k of Object.keys(r)) if (typeof r[k] === 'number' && k !== 'year') t[k] = (t[k] || 0) + r[k];
     return t;
   }, {});
   const priced = valued.filter((p) => p.value != null);
@@ -188,8 +192,13 @@ export function yearlySummary(pf, valued, today = new Date()) {
       openCost,
       missingPrices: valued.length - priced.length,
       totalPnl: (totals.net || 0) + unrealized,
-      // Return on everything you ever put in (simple, not time-weighted).
-      totalReturnPct: totals.invested ? ((totals.net || 0) + unrealized) / totals.invested : 0,
+      // Simple return (not time-weighted) on the cash you added, or on the cost of what you hold
+      // when deposits aren't in the history. Total purchases would understate it for active traders.
+      returnBase: totals.cashAdded > 0 ? 'cash added' : 'cost of current holdings',
+      totalReturnPct: (() => {
+        const base = totals.cashAdded > 0 ? totals.cashAdded : openCost;
+        return base ? ((totals.net || 0) + unrealized) / base : 0;
+      })(),
     },
   };
 }

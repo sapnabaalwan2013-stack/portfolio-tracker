@@ -3,6 +3,7 @@ import { importBrokerCsv, toCsv } from './csv.js';
 import { Finnhub, clearMarketCache } from './market.js';
 import { rateStock, headlineSentiment, marketMood, moodLabel } from './rating.js';
 import { upcomingMacro } from './events.js';
+import { isTax1099Csv, parseTax1099Csv, applyTaxDocs, symbolMapFromTxns } from './tax.js';
 
 // ---------- storage ----------
 const store = {
@@ -13,6 +14,8 @@ const store = {
 
 let txns = store.get('txns', []);
 let apiKey = store.get('key', '');
+let taxDocs = store.get('tax', {}); // {year: {year, lots, dividends, interest}}
+const hasData = () => txns.length > 0 || Object.keys(taxDocs).length > 0;
 const market = { quotes: {}, metrics: {}, recs: {}, news: {}, profiles: {}, earnings: [], marketNews: [], spy: null, loadedAt: null };
 const charts = {};
 
@@ -59,7 +62,7 @@ $('#theme').addEventListener('click', () => {
 
 // ---------- derived state ----------
 function derive() {
-  const pf = computePortfolio(txns);
+  const pf = applyTaxDocs(computePortfolio(txns), taxDocs, symbolMapFromTxns(txns));
   const prices = {};
   for (const [s, q] of Object.entries(market.quotes)) if (q && q.c > 0) prices[s] = q.c;
   const valued = valuePositions(pf.positions, prices);
@@ -100,6 +103,7 @@ function render() {
   renderNews(d);
   renderEvents(d);
   renderTxns(d);
+  renderTaxDocs();
   window.__last = d;
   if (!$('#tab-dashboard').hidden) drawCharts();
 }
@@ -112,7 +116,7 @@ function emptyState() {
 }
 
 function renderKpis({ summary, valued }) {
-  if (!txns.length) { $('#kpis').innerHTML = emptyState(); $('#kpis').style.display = 'block'; return; }
+  if (!hasData()) { $('#kpis').innerHTML = emptyState(); $('#kpis').style.display = 'block'; return; }
   $('#kpis').style.display = '';
   const t = summary.totals;
   const thisYear = summary.rows[summary.rows.length - 1];
@@ -120,10 +124,10 @@ function renderKpis({ summary, valued }) {
   const tiles = [
     ['Market value', usd(t.marketValue || t.openCost), t.missingPrices ? `${t.missingPrices} holding(s) without a live price` : `Cost basis ${usd(t.openCost)}`],
     ["Today's change", usd(dayChange, true), market.loadedAt ? 'as of ' + market.loadedAt.toLocaleTimeString() : 'add API key for live prices', dayChange],
-    ['Total P&L (till date)', usd(t.totalPnl, true), pct(t.totalReturnPct) + ' on total invested', t.totalPnl],
+    ['Total P&L (till date)', usd(t.totalPnl, true), pct(t.totalReturnPct) + ' on ' + t.returnBase, t.totalPnl],
     ['Unrealized (open)', usd(t.unrealized, true), t.openCost ? pct(t.unrealized / t.openCost) + ' on cost' : '', t.unrealized],
     ['Realized gains', usd(t.realizedGain, true), `Dividends ${usd(t.income)} · Fees ${usd(t.fees)}`, t.realizedGain],
-    [`${thisYear.year} net (realized)`, usd(thisYear.net, true), `Net new money ${usd(thisYear.netNew)} this year`, thisYear.net],
+    [`${thisYear.year} net (realized)`, usd(thisYear.net, true), thisYear.cashAdded ? `Cash added ${usd(thisYear.cashAdded)} this year` : `Net new money ${usd(thisYear.netNew)} this year`, thisYear.net],
   ];
   $('#kpis').innerHTML = tiles.map(([label, value, delta, sign]) =>
     `<div class="kpi"><div class="label">${label}</div><div class="value ${sign != null ? cls(sign) : ''}">${value}</div><div class="delta">${esc(delta)}</div></div>`).join('');
@@ -132,15 +136,16 @@ function renderKpis({ summary, valued }) {
 let selectedYear = null;
 function renderYearly({ summary, pf }) {
   const cur = new Date().getFullYear();
-  const head = '<tr><th>Year</th><th title="Every purchase added up. Selling and buying again counts twice.">Total purchases</th><th>Sold (proceeds)</th><th title="Purchases minus sale proceeds: roughly the new money you put in">Net new money</th><th>Short-term gain</th><th>Long-term gain</th><th>Dividends &amp; interest</th><th>Fees</th><th>Net realized P&amp;L</th><th>Unrealized</th><th>Total P&amp;L</th></tr>';
+  const showCash = summary.rows.some((r) => r.cashAdded);
+  const head = '<tr><th>Year</th><th class="left" title="1099 = taken from your tax form. Activity = worked out from your trade history.">Source</th>' + (showCash ? '<th title="Deposits minus withdrawals">Cash added</th>' : '') + '<th title="Every purchase added up. Selling and buying again counts twice.">Bought (all trades)</th><th>Sold (proceeds)</th><th title="Purchases minus sale proceeds">Net new money</th><th>Short-term gain</th><th>Long-term gain</th><th>Dividends &amp; interest</th><th>Fees</th><th>Net realized P&amp;L</th><th>Unrealized</th><th>Total P&amp;L</th></tr>';
   const row = (r, unreal, label = r.year) => `<tr${label === 'Till date' ? ' class="total"' : ` class="clickable${selectedYear === r.year ? ' selected' : ''}" data-year="${r.year}" title="Click to see what you bought and sold in ${r.year}"`}>
-    <td>${label}${label === 'Till date' ? '' : ' <span class="chev">›</span>'}</td><td>${usd(r.invested)}</td><td>${usd(r.proceeds)}</td><td>${usd(r.netNew)}</td>
+    <td>${label}${label === 'Till date' ? '' : ' <span class="chev">›</span>'}</td><td class="left">${label === 'Till date' ? '' : `<span class="src ${r.source === '1099' ? 'tax' : ''}">${r.source}</span>`}</td>${showCash ? `<td>${usd(r.cashAdded)}</td>` : ''}<td>${r.buysUnknown === true ? '<span title="Not on the 1099. Import trade history for this year to fill it in.">—</span>' : usd(r.invested)}</td><td>${usd(r.proceeds)}</td><td>${r.buysUnknown === true ? '—' : usd(r.netNew)}</td>
     <td class="${cls(r.shortTerm)}">${usd(r.shortTerm, true)}</td><td class="${cls(r.longTerm)}">${usd(r.longTerm, true)}</td>
     <td>${usd(r.income)}</td><td>${r.fees ? usd(-r.fees) : usd(0)}</td><td class="${cls(r.net)}"><b>${usd(r.net, true)}</b></td>
     <td class="${cls(unreal)}">${unreal == null ? '' : usd(unreal, true)}</td>
     <td class="${cls(r.net + (unreal || 0))}"><b>${usd(r.net + (unreal || 0), true)}</b></td></tr>`;
   const body = summary.rows.map((r) => row(r, r.year === cur ? summary.totals.unrealized : null)).join('');
-  $('#yearly-table').innerHTML = txns.length ? head + body + row(summary.totals, summary.totals.unrealized, 'Till date') : '';
+  $('#yearly-table').innerHTML = hasData() ? head + body + row(summary.totals, summary.totals.unrealized, 'Till date') : '';
   renderYearDetail(pf);
 }
 
@@ -163,7 +168,7 @@ function renderYearDetail(pf) {
   const tb = rows.reduce((s, r) => s + r.bought, 0), ts = rows.reduce((s, r) => s + r.sold, 0);
   el.innerHTML = `<div class="detail">
     <div class="card-head"><h3>${selectedYear}: what you bought and sold</h3><button class="btn ghost" data-close-year>Close</button></div>
-    <p class="sub">"Total purchases" adds up every buy. If you sell a stock and buy again with the same money, both buys count, so this can be much bigger than the cash you added. "Net new money" is closer to what you actually put in.</p>
+    <p class="sub">"Bought (all trades)" adds up every buy. If you sell a stock and buy again with the same money, both buys count, so this can be much bigger than the cash you added. "Net new money" is closer to what you actually put in.</p>
     <div class="table-wrap"><table class="data">
       <tr><th>Stock</th><th>Buys</th><th>Bought</th><th>Sales</th><th>Sold</th><th>Net</th></tr>
       ${rows.map((r) => `<tr><td class="sym">${esc(r.symbol)}</td><td>${r.buys || '—'}</td><td>${r.buys ? usd(r.bought) : '—'}</td>
@@ -189,6 +194,7 @@ function salesFrom(pf) {
   for (const r of pf.realized) {
     const s = bySale.get(r.saleId) || { id: r.saleId, date: r.date, year: r.year, symbol: r.symbol, quantity: 0, cost: 0, proceeds: 0, gain: 0, firstBuy: r.boughtDate, lastBuy: r.boughtDate, terms: new Set() };
     s.quantity += r.quantity; s.cost += r.cost; s.proceeds += r.proceeds; s.gain += r.gain; s.terms.add(r.term);
+    s.washSale = (s.washSale || 0) + (r.washSale || 0); s.source = r.source || 'Activity';
     if (r.boughtDate < s.firstBuy) s.firstBuy = r.boughtDate;
     if (r.boughtDate > s.lastBuy) s.lastBuy = r.boughtDate;
     bySale.set(r.saleId, s);
@@ -224,7 +230,7 @@ function renderSold({ pf }) {
   el.innerHTML = '<tr>' + cols.map(([k, label, align]) =>
     `<th class="${align || ''}"><button class="sort" data-sort="${k}" aria-sort="${soldView.sort === k ? (soldView.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${arrow(k)}</button></th>`).join('') + '</tr>' +
     rows.map((s) => `<tr><td class="left">${s.date}</td><td class="left sym">${esc(s.symbol)}</td><td>${qty(s.quantity)}</td><td class="left">${buyRange(s)}</td>
-      <td>${usd(s.cost)}</td><td>${usd(s.proceeds)}</td><td class="${cls(s.gain)}">${usd(s.gain, true)}</td><td class="${cls(s.gain)}">${pct(s.ret)}</td><td class="left">${s.term}</td></tr>`).join('') +
+      <td>${usd(s.cost)}</td><td>${usd(s.proceeds)}</td><td class="${cls(s.gain)}">${usd(s.gain, true)}${s.washSale ? `<br><small title="Loss disallowed by the wash-sale rule, added back as on your 1099">wash sale +${usd(s.washSale)}</small>` : ''}</td><td class="${cls(s.gain)}">${pct(s.ret)}</td><td class="left">${s.term}${s.source === '1099' ? ' <span class="src tax">1099</span>' : ''}</td></tr>`).join('') +
     `<tr class="total"><td class="left">Total</td><td class="left">${rows.length} sale${rows.length === 1 ? '' : 's'}</td><td></td><td></td>
       <td>${usd(t.cost)}</td><td>${usd(t.proceeds)}</td><td class="${cls(t.gain)}">${usd(t.gain, true)}</td><td class="${cls(t.gain)}">${t.cost ? pct(t.gain / t.cost) : '—'}</td><td></td></tr>`;
 }
@@ -424,23 +430,59 @@ function saveTxns(list) {
 }
 
 $('#csv-file').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
+  const files = [...e.target.files];
   e.target.value = '';
-  if (!file) return;
-  try {
-    const { txns: rows, skipped } = importBrokerCsv(await file.text());
-    const replace = $('#csv-replace').checked;
-    // Skip rows already imported (same date/type/symbol/qty/price/amount) so re-importing overlapping ranges is safe.
-    const key = (t) => [t.date, t.type, t.symbol, +(+t.quantity).toFixed(6), +(+t.price).toFixed(4), t.amount == null ? '' : +(+t.amount).toFixed(2)].join('|');
-    const existing = new Set((replace ? [] : txns).map(key));
-    const fresh = rows.filter((t) => !existing.has(key(t)));
-    saveTxns([...(replace ? [] : txns), ...fresh]);
-    $('#import-result').innerHTML = `Imported <b>${fresh.length}</b> transaction(s)` +
-      (rows.length - fresh.length ? `, ${rows.length - fresh.length} duplicate(s) skipped` : '') +
-      (skipped.length ? `. ${skipped.length} row(s) ignored (e.g. line ${skipped[0].line}: ${esc(skipped[0].reason)}).` : '.');
-    refreshMarket();
-  } catch (err) {
-    $('#import-result').innerHTML = `<span class="down">${esc(err.message)}</span>`;
+  if (!files.length) return;
+  const msgs = [];
+  let replace = $('#csv-replace').checked;
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      if (isTax1099Csv(text)) {
+        const doc = parseTax1099Csv(text, file.name);
+        taxDocs = { ...taxDocs, [doc.year]: doc };
+        store.set('tax', taxDocs);
+        msgs.push(`<b>${esc(file.name)}</b>: ${doc.year} tax form, ${doc.lots.length} sale lot(s), dividends ${usd(doc.dividends)}.`);
+        continue;
+      }
+      const { txns: rows, skipped } = importBrokerCsv(text);
+      // Skip rows already imported (same date/type/symbol/qty/price/amount) so re-importing overlapping ranges is safe.
+      const key = (t) => [t.date, t.type, t.symbol, +(+t.quantity).toFixed(6), +(+t.price).toFixed(4), t.amount == null ? '' : +(+t.amount).toFixed(2)].join('|');
+      const base = replace ? [] : txns;
+      const existing = new Set(base.map(key));
+      const fresh = rows.filter((t) => !existing.has(key(t)));
+      txns = [...base, ...fresh].map(normalizeTxn);
+      store.set('txns', txns);
+      replace = false; // only the first activity file replaces
+      msgs.push(`<b>${esc(file.name)}</b>: imported ${fresh.length} transaction(s)` +
+        (rows.length - fresh.length ? `, ${rows.length - fresh.length} duplicate(s) skipped` : '') +
+        (skipped.length ? `, ${skipped.length} row(s) ignored (e.g. line ${skipped[0].line}: ${esc(skipped[0].reason)})` : '') + '.');
+    } catch (err) {
+      msgs.push(`<span class="down"><b>${esc(file.name)}</b>: ${esc(err.message)}</span>`);
+    }
+  }
+  $('#import-result').innerHTML = msgs.join('<br>');
+  render();
+  refreshMarket();
+});
+
+function renderTaxDocs() {
+  const years = Object.keys(taxDocs).sort();
+  $('#tax-list').innerHTML = years.length ? '<tr><th>Tax year</th><th>Sale lots</th><th>Proceeds</th><th>Cost</th><th>Gain / loss</th><th>Dividends</th><th>Interest</th><th></th></tr>' +
+    years.map((y) => {
+      const d = taxDocs[y];
+      const t = d.lots.reduce((a, l) => ({ p: a.p + l.proceeds, c: a.c + l.cost, g: a.g + l.gain }), { p: 0, c: 0, g: 0 });
+      return `<tr><td>${y}</td><td>${d.lots.length}</td><td>${usd(t.p)}</td><td>${usd(t.c)}</td><td class="${cls(t.g)}">${usd(t.g, true)}</td>
+        <td>${usd(d.dividends)}</td><td>${usd(d.interest)}</td><td><button class="del" data-del-tax="${y}" title="Remove" aria-label="Remove ${y} tax data">×</button></td></tr>`;
+    }).join('') : '<tr><td class="left">No tax forms imported yet.</td></tr>';
+}
+$('#tax-list').addEventListener('click', (e) => {
+  const y = e.target.dataset?.delTax;
+  if (y && confirm(`Remove the ${y} tax data? That year will go back to being worked out from your trade history.`)) {
+    const { [y]: _, ...rest } = taxDocs;
+    taxDocs = rest;
+    store.set('tax', taxDocs);
+    render();
   }
 });
 
@@ -467,7 +509,7 @@ function download(name, text, type) {
 }
 const stamp = () => new Date().toISOString().slice(0, 10);
 $('#export-csv').addEventListener('click', () => download(`transactions-${stamp()}.csv`, toCsv(txns), 'text/csv'));
-$('#export-json').addEventListener('click', () => download(`portfolio-backup-${stamp()}.json`, JSON.stringify({ version: 1, txns }, null, 2), 'application/json'));
+$('#export-json').addEventListener('click', () => download(`portfolio-backup-${stamp()}.json`, JSON.stringify({ version: 2, txns, taxDocs }, null, 2), 'application/json'));
 $('#import-json').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
@@ -476,7 +518,10 @@ $('#import-json').addEventListener('change', async (e) => {
     const data = JSON.parse(await file.text());
     const list = Array.isArray(data) ? data : data.txns;
     if (!Array.isArray(list)) throw new Error('Not a backup file');
-    if (confirm(`Replace your ${txns.length} transactions with ${list.length} from the backup?`)) { saveTxns(list); refreshMarket(); }
+    if (confirm(`Replace your ${txns.length} transactions with ${list.length} from the backup?`)) {
+      if (data.taxDocs) { taxDocs = data.taxDocs; store.set('tax', taxDocs); }
+      saveTxns(list); refreshMarket();
+    }
   } catch (err) { alert('Could not read backup: ' + err.message); }
 });
 
@@ -505,8 +550,8 @@ document.addEventListener('click', (e) => {
 $('#clear-cache').addEventListener('click', () => { clearMarketCache(); setStatus('Cache cleared'); });
 $('#clear-all').addEventListener('click', () => {
   if (!confirm('Delete all transactions and your API key from this browser? Export a backup first if you need one.')) return;
-  store.del('txns'); store.del('key'); clearMarketCache();
-  txns = []; apiKey = ''; $('#api-key').value = '';
+  store.del('txns'); store.del('key'); store.del('tax'); clearMarketCache();
+  txns = []; taxDocs = {}; apiKey = ''; $('#api-key').value = '';
   Object.assign(market, { quotes: {}, metrics: {}, recs: {}, news: {}, profiles: {}, earnings: [], marketNews: [], spy: null, loadedAt: null });
   render();
 });

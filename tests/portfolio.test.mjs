@@ -119,3 +119,41 @@ test('each realized lot remembers its sale and buy date', () => {
   ]);
   assert.deepEqual(pf.realized.map((r) => [r.saleId, r.boughtDate]), [['s1', '2025-01-02'], ['s1', '2025-03-02']]);
 });
+
+import { parseTax1099Csv, applyTaxDocs, isTax1099Csv } from '../js/tax.js';
+const tax2024 = readFileSync(new URL('./fixtures/sample-1099-2024.csv', import.meta.url), 'utf8');
+
+test('reads the Chase 1099 CSV: lots, wash sale, dividends', () => {
+  assert.ok(isTax1099Csv(tax2024));
+  const doc = parseTax1099Csv(tax2024, '2024-taxdocuments.csv');
+  assert.equal(doc.year, 2024);
+  assert.equal(doc.lots.length, 3);
+  assert.deepEqual(doc.lots.map((l) => l.name), ['APPLE INC', 'EXAMPLE CORP', 'EXAMPLE CORP']);
+  near(doc.lots[1].gain, 400 - 500 + 40); // wash-sale loss added back
+  assert.equal(doc.lots[0].term, 'long');
+  near(doc.dividends, 25); // ordinary + capital gain distributions
+  assert.equal(doc.interest, 0);
+});
+
+test('a 1099 year replaces the activity-based numbers for that year only', () => {
+  const pf = computePortfolio([
+    { date: '2024-01-02', type: 'BUY', symbol: 'AAPL', quantity: 10, price: 150, note: 'APPLE INC' },
+    { date: '2024-05-10', type: 'SELL', symbol: 'AAPL', quantity: 5, price: 999 },
+    { date: '2024-07-01', type: 'DIVIDEND', symbol: 'AAPL', amount: 1 },
+    { date: '2025-03-01', type: 'SELL', symbol: 'AAPL', quantity: 5, price: 200 },
+  ]);
+  const doc = parseTax1099Csv(tax2024, '2024.csv');
+  const merged = applyTaxDocs(pf, { 2024: doc }, { 'APPLE INC': 'AAPL' });
+  const s = yearlySummary(merged, [], new Date('2025-12-01'));
+  const y24 = s.rows.find((r) => r.year === 2024), y25 = s.rows.find((r) => r.year === 2025);
+  assert.equal(y24.source, '1099');
+  near(y24.realizedGain, 150 - 60 + 30);
+  near(y24.income, 25);
+  assert.equal(y25.source, 'Activity');
+  near(y25.realizedGain, 5 * 200 - 5 * 150);
+  assert.ok(merged.realized.some((r) => r.symbol === 'AAPL' && r.source === '1099'));
+});
+
+test('rejects a tax file whose name and dates disagree', () => {
+  assert.throws(() => parseTax1099Csv(tax2024, '2023 taxes.csv'), /another year/);
+});

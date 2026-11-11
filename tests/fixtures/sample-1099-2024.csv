@@ -1,0 +1,24 @@
+Disclosure and Header
+Disclosure: Sample file with made-up numbers in the same layout as the Chase 1099 tax data download.
+As Of,Corrected,Corrected Date,Receiver Account,Payer Id,Payer Name1,Payer Name2,Address1,Address2,Address3,City,State,Zip,Phone
+01-Feb-2025 12:00 AM UTC,No,,00000000,00-0000000,SAMPLE BROKER,,1 MAIN ST,,,ANYTOWN,NY,10000,000-000-0000
+
+Receiver Name1,Receiver Name2,Address1,Address2,Address3,City,State,Zip,Country,Phone
+SAMPLE INVESTOR,,1 SAMPLE ST,,,ANYTOWN,CA,90000,USA,
+
+1099B Data
+(Box 1a) Description  of Property,(Box 1b) Acquired Date,(Box 1c) Date sold or disposed,(Box 1d) Proceeds,(Box 1e) Cost or other basis,(Box 1f) Accrued Market Discount,(Box 1g) Wash Sale Loss Disallowed,(Box 2) Type of Gain or Loss SHORT=Short Term LONG=Long Term SHORT/ORD=Short term ordinary GL LONG/ORD=Long term ordinary GL,(Box 3) Check If proceeds from collectibles,(Box 3) QOF,(Box 4) Federal Income Tax Withheld,(Box 5) Non Covered Security (N=Covered Y=Non Covered),(Box 6) Reported to the IRS (G=Gross Proceeds N=Net Proceeds),(Box 7) Loss not allowed Based on amount In Box 1d (Y=Loss not allowed N=Loss allowed),(Box 8) Profit or loss realized in 2025 on closed contracts,(Box 9) Unrealized profit or (loss) on open contracts-12/31/2024,(Box 10) Unrealized profit or (loss) on open contracts-12/31/2025,(Box 11) Aggregate profit or loss on contracts,(Box 12 Basis Reported to the IRS N=NO(Cost Basis Reported to IRS) Y=YES(Cost Basis Not Reported to IRS),CUSIP Number,(Box 15) State ID No,(Box 16) State Tax Withheld
+,,,,,,,,,,,,,,,,,,,,,0.0
+5 SH. APPLE INC,2023-03-01,2024-05-10,900.0,750.0,,,LONG,N,N,0.0,N,G,N,,,,,N,037833100,,
+10 SH. ***EXAMPLE CORP,2024-02-01,2024-06-01,400.0,500.0,,40.0,SHORT,N,N,0.0,N,G,Y,,,,,N,000000000,,
+10 SH. ***EXAMPLE CORP,2024-01-15,2024-06-01,410.0,380.0,,,SHORT,N,N,0.0,N,G,N,,,,,N,000000000,,
+
+1099Div Data
+(Box 1a) Total Ordinary Dividends,(Box 1b) Qualified Dividends,(Box 2a) Total Capital Gain Distributions,(Box 2b) UnRecap. Sec. 1250 Gain,(Box 2c) Sec1202 Gain,(Box 2d) Collectibles (28%) Gain,(Box 2e) Section 897 ordinary dividends,(Box 2f) Section 897 capital gain,(Box 3) Non Dividend Distributions,(Box 4) Federal Income Tax Withheld,(Box 5) Section 199A dividends,(Box 6) Investment Expenses,(Box 7) Foreign Tax Paid,(Box 8) Foreign Country or U.S. Possession,(Box 9) Cash Liquidation Distributions,(Box 10) Non Cash Liquidation Distributions,(Box 11)  FATCA filing requirement,(Box 12) Exempt-interest Dividends,(Box 13) Specified Private Activity Bond Interest Dividend,(Box 15) State Identification No,(Box 16) State Tax Withheld
+20.0,20.0,5.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,0.0,0.0,N,0.0,,0.0
+
+1099Int Data
+No data found for the account
+
+1099Misc Data
+No data found for the account

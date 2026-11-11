@@ -34,6 +34,12 @@ To try it first, click **Settings → Load sample data**.
 2. Go to **Activity**, set the date range to start before your first trade (e.g. 01/01/2025), and **Download** as CSV. Chase may limit each download to a date range; download several and import each one. Duplicate rows are skipped automatically.
 3. Import the file on the **Transactions** tab.
 
+### Past years from your tax forms (1099)
+
+On chase.com go to **Statements & documents → Tax documents**, download each year's 1099 **as CSV**, and choose the files on the **Transactions** tab (several at once is fine). For each year with a 1099, the app uses the form's sales, cost basis (including wash-sale adjustments) and dividends, because that's what the IRS sees. Years without a 1099 are worked out from your trade history. Keep the year in the file name (e.g. `2024-taxdocuments.csv`). Only the sale lots and totals are saved, never your name, address or account number.
+
+A 1099 lists what you sold, not what you bought, so to see your current holdings you still need the trade history going back to your first purchase.
+
 The importer matches columns by name (`Trade Date`, `Type`/`Action`, `Ticker`/`Symbol`, `Quantity`, `Price`, `Amount`, `Commission`), so column order doesn't matter. Rows it can't read are listed after the import. You can also add or delete transactions by hand.
 
 Transaction types: `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `FEE`, `SPLIT` (quantity = extra shares received), `DEPOSIT`, `WITHDRAWAL`. Dividend reinvestments are imported as buys.
@@ -47,7 +53,10 @@ Transaction types: `BUY`, `SELL`, `DIVIDEND`, `INTEREST`, `FEE`, `SPLIT` (quanti
 | Net realized P&L | Realized gain + dividends & interest − fees. |
 | Unrealized | Today's value − cost of shares you still hold. |
 | Total P&L (till date) | All net realized P&L + unrealized. |
-| Return % | Total P&L ÷ total amount ever bought (simple, not time-weighted). |
+| Bought (all trades) | Every purchase added up. Selling and re-buying counts each time, so active trading makes this much bigger than the money you put in. |
+| Net new money | Purchases − sale proceeds for the year. |
+| Cash added | Deposits − withdrawals (when they're in the trade history). |
+| Return % | Total P&L ÷ cash added (or ÷ cost of current holdings if deposits aren't in the history). Simple, not time-weighted. |
 
 Your Chase 1099-B is the source of truth for taxes. If you picked specific tax lots when selling, the per-year split here may differ.
 
@@ -116,6 +125,7 @@ js/csv.js             Chase / broker CSV import
 js/rating.js          score, grade, Buy/Hold/Sell note
 js/market.js          Finnhub client with caching + rate limiting
 js/events.js          jobs / CPI / Fed calendar
+js/tax.js             Chase 1099 CSV import
 sample/               sample Chase-style CSV
 tests/                unit tests (node --test)
 ```

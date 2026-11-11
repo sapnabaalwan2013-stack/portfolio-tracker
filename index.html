@@ -105,9 +105,10 @@
             <li>Sign in at chase.com and open your <b>Self-Directed Investing</b> account.</li>
             <li>Go to <b>Activity</b> (or <b>Statements &amp; documents → Activity</b>), choose a date range starting from your first trade, and click <b>Download</b> as CSV.</li>
             <li>Choose that file below. Columns are matched by name, so other brokers' CSVs work too.</li>
+            <li>For past years, also add your tax forms: <b>Statements &amp; documents → Tax documents</b>, download each year's 1099 as <b>CSV</b>, and choose them here (you can pick several at once).</li>
           </ol>
           <div class="row">
-            <label class="btn file">Choose CSV file<input id="csv-file" type="file" accept=".csv,text/csv" hidden></label>
+            <label class="btn file">Choose CSV file<input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden></label>
             <label class="check"><input id="csv-replace" type="checkbox"> Replace existing transactions</label>
           </div>
           <div id="import-result" class="sub"></div>
@@ -141,6 +142,10 @@
           </div>
         </div>
         <div id="warnings"></div>
+        <h3 class="mini">Tax forms (1099)</h3>
+        <p class="sub">For these years, sales, profit/loss and dividends come from your 1099, since that's what's reported to the IRS.</p>
+        <div class="table-wrap"><table id="tax-list" class="data"></table></div>
+        <h3 class="mini">Trade history</h3>
         <div class="table-wrap"><table id="txn-table" class="data"></table></div>
       </div>
     </section>

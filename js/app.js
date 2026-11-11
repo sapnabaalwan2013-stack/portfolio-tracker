@@ -115,35 +115,55 @@ function emptyState() {
     <button class="btn ghost" data-sample>Load sample data</button></div></div>`;
 }
 
-function renderKpis({ summary, valued }) {
-  if (!hasData()) { $('#kpis').innerHTML = emptyState(); $('#kpis').style.display = 'block'; return; }
+function renderKpis({ summary, valued, pf }) {
+  if (!hasData()) { $('#kpis').innerHTML = emptyState(); $('#kpis').style.display = 'block'; $('#history-gap').innerHTML = ''; return; }
   $('#kpis').style.display = '';
   const t = summary.totals;
-  const thisYear = summary.rows[summary.rows.length - 1];
   const dayChange = valued.reduce((s, p) => s + (p.quote?.d ? p.quote.d * p.quantity : 0), 0);
+  const priced = t.missingPrices === 0 && valued.length > 0;
+  const booked = t.totalPnl - t.unrealized;
   const tiles = [
-    ['Market value', usd(t.marketValue || t.openCost), t.missingPrices ? `${t.missingPrices} holding(s) without a live price` : `Cost basis ${usd(t.openCost)}`],
-    ["Today's change", usd(dayChange, true), market.loadedAt ? 'as of ' + market.loadedAt.toLocaleTimeString() : 'add API key for live prices', dayChange],
-    ['Total P&L (till date)', usd(t.totalPnl, true), pct(t.totalReturnPct) + ' on ' + t.returnBase, t.totalPnl],
-    ['Unrealized (open)', usd(t.unrealized, true), t.openCost ? pct(t.unrealized / t.openCost) + ' on cost' : '', t.unrealized],
-    ['Realized gains', usd(t.realizedGain, true), `Dividends ${usd(t.income)} · Fees ${usd(t.fees)}`, t.realizedGain],
-    [`${thisYear.year} net (realized)`, usd(thisYear.net, true), thisYear.cashAdded ? `Cash added ${usd(thisYear.cashAdded)} this year` : `Net new money ${usd(thisYear.netNew)} this year`, thisYear.net],
+    ['Invested in stocks now', usd(t.openCost), `What you paid for the ${valued.length} stock${valued.length === 1 ? '' : 's'} you own today`],
+    ['Worth today', priced || t.marketValue ? usd(t.marketValue) : '—',
+      priced ? `${usd(t.unrealized, true)} (${pct(t.openCost ? t.unrealized / t.openCost : 0)}) vs what you paid`
+        : t.missingPrices && valued.length ? `${t.missingPrices} stock(s) without a live price yet` : 'Add your Finnhub key for live prices', priced ? t.unrealized : null],
+    ['Total profit till date', usd(t.totalPnl, true), `Booked ${usd(booked, true)} + on paper ${usd(t.unrealized, true)}`, t.totalPnl],
+    ["Today's change", usd(dayChange, true), market.loadedAt ? 'as of ' + market.loadedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Add your Finnhub key for live prices', dayChange],
   ];
+  if (t.cashAdded > 0) {
+    tiles.splice(0, 0, ['Money you put in', usd(t.cashAdded), 'Deposits minus withdrawals, till date']);
+    tiles.push(['Cash not in stocks', usd(t.cashLeft), 'Estimate: money put in + booked profit − invested now']);
+  }
   $('#kpis').innerHTML = tiles.map(([label, value, delta, sign]) =>
     `<div class="kpi"><div class="label">${label}</div><div class="value ${sign != null ? cls(sign) : ''}">${value}</div><div class="delta">${esc(delta)}</div></div>`).join('');
+
+  // If sales show up with no earlier purchase, the trade history starts too late and "invested now" is too low.
+  const gaps = [...new Set(pf.missingHistory.map((m) => m.symbol))];
+  $('#history-gap').innerHTML = gaps.length ? `<div class="alert warn"><b>Some purchases are missing.</b> You sold ${gaps.slice(0, 6).map(esc).join(', ')}${gaps.length > 6 ? ` and ${gaps.length - 6} more` : ''} without a matching earlier buy, so your trade history doesn't start early enough. Holdings and "Invested in stocks now" may be too low. Download your Chase activity from your very first trade and import it on the <b>Transactions</b> tab.</div>` : '';
 }
 
 let selectedYear = null;
 function renderYearly({ summary, pf }) {
   const cur = new Date().getFullYear();
   const showCash = summary.rows.some((r) => r.cashAdded);
-  const head = '<tr><th>Year</th><th class="left" title="1099 = taken from your tax form. Activity = worked out from your trade history.">Source</th>' + (showCash ? '<th title="Deposits minus withdrawals">Cash added</th>' : '') + '<th title="Every purchase added up. Selling and buying again counts twice.">Bought (all trades)</th><th>Sold (proceeds)</th><th title="Purchases minus sale proceeds">Net new money</th><th>Short-term gain</th><th>Long-term gain</th><th>Dividends &amp; interest</th><th>Fees</th><th>Net realized P&amp;L</th><th>Unrealized</th><th>Total P&amp;L</th></tr>';
-  const row = (r, unreal, label = r.year) => `<tr${label === 'Till date' ? ' class="total"' : ` class="clickable${selectedYear === r.year ? ' selected' : ''}" data-year="${r.year}" title="Click to see what you bought and sold in ${r.year}"`}>
-    <td>${label}${label === 'Till date' ? '' : ' <span class="chev">›</span>'}</td><td class="left">${label === 'Till date' ? '' : `<span class="src ${r.source === '1099' ? 'tax' : ''}">${r.source}</span>`}</td>${showCash ? `<td>${usd(r.cashAdded)}</td>` : ''}<td>${r.buysUnknown === true ? '<span title="Not on the 1099. Import trade history for this year to fill it in.">—</span>' : usd(r.invested)}</td><td>${usd(r.proceeds)}</td><td>${r.buysUnknown === true ? '—' : usd(r.netNew)}</td>
+  const head = '<tr><th>Year</th><th class="left" title="1099 = from your tax form. Activity = from your trade history.">Source</th>' +
+    (showCash ? '<th title="Deposits minus withdrawals">Money put in</th>' : '') +
+    '<th title="What you had paid for the stocks you held on Dec 31 (today for this year)">In stocks at year end</th><th title="How much more (or less) money was in stocks than a year earlier">Change</th>' +
+    '<th>Short-term gain</th><th>Long-term gain</th><th>Dividends &amp; interest</th><th>Fees</th><th title="Realized gains + dividends − fees">Booked P&amp;L</th><th title="Gain or loss on stocks you still own">On paper</th><th>Total P&amp;L</th></tr>';
+  const unknown = (r) => r.buysUnknown === true && !r.investedEnd;
+  const row = (r, unreal, label = r.year) => {
+    const total = label === 'Till date';
+    const inStocksLabel = total ? usd(r.investedEnd) + '<br><small>now</small>' : r.year === cur ? usd(r.investedEnd) + '<br><small>today</small>' : usd(r.investedEnd);
+    return `<tr${total ? ' class="total"' : ` class="clickable${selectedYear === r.year ? ' selected' : ''}" data-year="${r.year}" title="Click to see what you bought and sold in ${r.year}"`}>
+    <td>${label}${total ? '' : ' <span class="chev">›</span>'}</td><td class="left">${total ? '' : `<span class="src ${r.source === '1099' ? 'tax' : ''}">${r.source}</span>`}</td>
+    ${showCash ? `<td>${usd(r.cashAdded)}</td>` : ''}
+    <td>${unknown(r) ? '<span title="Your trade history for this year is missing, so holdings at year end are unknown">—</span>' : inStocksLabel}</td>
+    <td class="${total ? '' : cls(r.investedChange)}">${unknown(r) || total ? '' : usd(r.investedChange, true)}</td>
     <td class="${cls(r.shortTerm)}">${usd(r.shortTerm, true)}</td><td class="${cls(r.longTerm)}">${usd(r.longTerm, true)}</td>
     <td>${usd(r.income)}</td><td>${r.fees ? usd(-r.fees) : usd(0)}</td><td class="${cls(r.net)}"><b>${usd(r.net, true)}</b></td>
     <td class="${cls(unreal)}">${unreal == null ? '' : usd(unreal, true)}</td>
     <td class="${cls(r.net + (unreal || 0))}"><b>${usd(r.net + (unreal || 0), true)}</b></td></tr>`;
+  };
   const body = summary.rows.map((r) => row(r, r.year === cur ? summary.totals.unrealized : null)).join('');
   $('#yearly-table').innerHTML = hasData() ? head + body + row(summary.totals, summary.totals.unrealized, 'Till date') : '';
   renderYearDetail(pf);
@@ -168,7 +188,7 @@ function renderYearDetail(pf) {
   const tb = rows.reduce((s, r) => s + r.bought, 0), ts = rows.reduce((s, r) => s + r.sold, 0);
   el.innerHTML = `<div class="detail">
     <div class="card-head"><h3>${selectedYear}: what you bought and sold</h3><button class="btn ghost" data-close-year>Close</button></div>
-    <p class="sub">"Bought (all trades)" adds up every buy. If you sell a stock and buy again with the same money, both buys count, so this can be much bigger than the cash you added. "Net new money" is closer to what you actually put in.</p>
+    <p class="sub">Every purchase and sale this year. Re-using the same money counts each time you buy, so these totals can be much bigger than the money in stocks.</p>
     <div class="table-wrap"><table class="data">
       <tr><th>Stock</th><th>Buys</th><th>Bought</th><th>Sales</th><th>Sold</th><th>Net</th></tr>
       ${rows.map((r) => `<tr><td class="sym">${esc(r.symbol)}</td><td>${r.buys || '—'}</td><td>${r.buys ? usd(r.bought) : '—'}</td>

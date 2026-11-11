@@ -50,6 +50,7 @@ export function computePortfolio(rawTxns) {
   const buys = [];
   const warnings = [];
   const cashLike = { count: 0, amount: 0 };
+  const missingHistory = [];
 
   for (const t of txns) {
     const year = Number(t.date.slice(0, 4));
@@ -71,6 +72,7 @@ export function computePortfolio(rawTxns) {
         const held = queue.reduce((s, l) => s + l.qty, 0);
         let toSell = t.quantity;
         if (toSell > held + 1e-9) {
+          missingHistory.push({ symbol: t.symbol, date: t.date, quantity: toSell - held });
           warnings.push(`SELL of ${t.quantity} ${t.symbol} on ${t.date} exceeds the ${round(held, 4)} shares held; extra ignored`);
           toSell = held;
         }
@@ -134,7 +136,12 @@ export function computePortfolio(rawTxns) {
   if (cashLike.count) {
     warnings.push(`Left out ${cashLike.count} money-market / cash sweep transactions (${cashLike.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} of sweep "buys"). That is idle cash moving in and out, not an investment.`);
   }
-  return { txns, positions, realized, income, fees, cashFlows, buys, warnings, cashLike };
+  return { txns, positions, realized, income, fees, cashFlows, buys, warnings, cashLike, missingHistory };
+}
+
+/** What you'd paid for the shares you still held at the end of `isoDate`. */
+export function investedAt(txns, isoDate) {
+  return computePortfolio(txns.filter((t) => t.date <= isoDate)).positions.reduce((sum, p) => sum + p.cost, 0);
 }
 
 /** Attach live prices to positions. prices: {SYM: number} */
@@ -169,7 +176,9 @@ export function yearlySummary(pf, valued, today = new Date()) {
     const cashAdded = sum(pf.cashFlows);
     // A 1099 lists sales but not purchases. Without trade history for that year, buys are unknown.
     const buysUnknown = !!pf.taxYears?.has(y) && invested === 0;
+    const investedEnd = y === thisYear ? null : investedAt(pf.txns, `${y}-12-31`); // current year filled in below
     rows.push({
+      investedEnd,
       year: y, invested, proceeds, netNew: buysUnknown ? 0 : invested - proceeds, buysUnknown, cashAdded, realizedGain, shortTerm, longTerm, income, fees,
       net: realizedGain + income - fees,
       source: pf.taxYears?.has(y) ? '1099' : 'Activity',
@@ -183,6 +192,14 @@ export function yearlySummary(pf, valued, today = new Date()) {
   const unrealized = priced.reduce((s, p) => s + p.unrealized, 0);
   const marketValue = priced.reduce((s, p) => s + p.value, 0);
   const openCost = valued.reduce((s, p) => s + p.cost, 0);
+  // Money in stocks at each year end, and how much that changed during the year.
+  let prev = 0;
+  for (const r of rows) {
+    if (r.investedEnd == null) r.investedEnd = openCost;
+    r.investedChange = r.investedEnd - prev;
+    prev = r.investedEnd;
+  }
+  const cashAdded = totals.cashAdded || 0;
   return {
     rows,
     totals: {
@@ -190,6 +207,11 @@ export function yearlySummary(pf, valued, today = new Date()) {
       unrealized,
       marketValue,
       openCost,
+      cashAdded,
+      investedEnd: openCost,
+      investedChange: openCost,
+      // Deposits + booked profits − what's in stocks = cash sitting uninvested (only meaningful with deposits).
+      cashLeft: cashAdded > 0 ? cashAdded + (totals.net || 0) - openCost : null,
       missingPrices: valued.length - priced.length,
       totalPnl: (totals.net || 0) + unrealized,
       // Simple return (not time-weighted) on the cash you added, or on the cost of what you hold

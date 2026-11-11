@@ -157,3 +157,27 @@ test('a 1099 year replaces the activity-based numbers for that year only', () =>
 test('rejects a tax file whose name and dates disagree', () => {
   assert.throws(() => parseTax1099Csv(tax2024, '2023 taxes.csv'), /another year/);
 });
+
+test('money in stocks at each year end, and change over the year', () => {
+  const pf = computePortfolio([
+    { date: '2024-02-01', type: 'DEPOSIT', amount: 5000 },
+    { date: '2024-03-01', type: 'BUY', symbol: 'A', quantity: 10, price: 100 },
+    { date: '2024-04-01', type: 'SELL', symbol: 'A', quantity: 10, price: 110 },
+    { date: '2024-05-01', type: 'BUY', symbol: 'B', quantity: 10, price: 110 }, // same money re-used
+    { date: '2025-06-01', type: 'BUY', symbol: 'C', quantity: 5, price: 100 },
+  ]);
+  const valued = valuePositions(pf.positions, {});
+  const s = yearlySummary(pf, valued, new Date('2025-12-01'));
+  const [y24, y25] = s.rows;
+  near(y24.invested, 2100);         // two buys of the same money
+  near(y24.investedEnd, 1100);      // but only $1,100 is in stocks at year end
+  near(y25.investedEnd, 1600);
+  near(y25.investedChange, 500);
+  near(s.totals.cashAdded, 5000);
+  near(s.totals.cashLeft, 5000 + 100 - 1600);
+});
+
+test('flags sales with no earlier purchase (history starts too late)', () => {
+  const pf = computePortfolio([{ date: '2025-01-05', type: 'SELL', symbol: 'OLD', quantity: 3, price: 10 }]);
+  assert.deepEqual(pf.missingHistory.map((m) => m.symbol), ['OLD']);
+});

@@ -95,7 +95,7 @@ function render() {
   const d = derive();
   renderKpis(d);
   renderYearly(d);
-  renderRealizedBySymbol(d);
+  renderSold(d);
   renderHoldings(d);
   renderNews(d);
   renderEvents(d);
@@ -123,38 +123,121 @@ function renderKpis({ summary, valued }) {
     ['Total P&L (till date)', usd(t.totalPnl, true), pct(t.totalReturnPct) + ' on total invested', t.totalPnl],
     ['Unrealized (open)', usd(t.unrealized, true), t.openCost ? pct(t.unrealized / t.openCost) + ' on cost' : '', t.unrealized],
     ['Realized gains', usd(t.realizedGain, true), `Dividends ${usd(t.income)} · Fees ${usd(t.fees)}`, t.realizedGain],
-    [`${thisYear.year} net (realized)`, usd(thisYear.net, true), `Bought ${usd(thisYear.invested)} this year`, thisYear.net],
+    [`${thisYear.year} net (realized)`, usd(thisYear.net, true), `Net new money ${usd(thisYear.netNew)} this year`, thisYear.net],
   ];
   $('#kpis').innerHTML = tiles.map(([label, value, delta, sign]) =>
     `<div class="kpi"><div class="label">${label}</div><div class="value ${sign != null ? cls(sign) : ''}">${value}</div><div class="delta">${esc(delta)}</div></div>`).join('');
 }
 
-function renderYearly({ summary }) {
+let selectedYear = null;
+function renderYearly({ summary, pf }) {
   const cur = new Date().getFullYear();
-  const head = '<tr><th>Year</th><th>Bought</th><th>Sold (proceeds)</th><th>Short-term gain</th><th>Long-term gain</th><th>Dividends &amp; interest</th><th>Fees</th><th>Net realized P&amp;L</th><th>Unrealized</th><th>Total P&amp;L</th></tr>';
-  const row = (r, unreal, label = r.year) => `<tr${label === 'Till date' ? ' class="total"' : ''}><td>${label}</td><td>${usd(r.invested)}</td><td>${usd(r.proceeds)}</td>
+  const head = '<tr><th>Year</th><th title="Every purchase added up. Selling and buying again counts twice.">Total purchases</th><th>Sold (proceeds)</th><th title="Purchases minus sale proceeds: roughly the new money you put in">Net new money</th><th>Short-term gain</th><th>Long-term gain</th><th>Dividends &amp; interest</th><th>Fees</th><th>Net realized P&amp;L</th><th>Unrealized</th><th>Total P&amp;L</th></tr>';
+  const row = (r, unreal, label = r.year) => `<tr${label === 'Till date' ? ' class="total"' : ` class="clickable${selectedYear === r.year ? ' selected' : ''}" data-year="${r.year}" title="Click to see what you bought and sold in ${r.year}"`}>
+    <td>${label}${label === 'Till date' ? '' : ' <span class="chev">›</span>'}</td><td>${usd(r.invested)}</td><td>${usd(r.proceeds)}</td><td>${usd(r.netNew)}</td>
     <td class="${cls(r.shortTerm)}">${usd(r.shortTerm, true)}</td><td class="${cls(r.longTerm)}">${usd(r.longTerm, true)}</td>
     <td>${usd(r.income)}</td><td>${r.fees ? usd(-r.fees) : usd(0)}</td><td class="${cls(r.net)}"><b>${usd(r.net, true)}</b></td>
     <td class="${cls(unreal)}">${unreal == null ? '' : usd(unreal, true)}</td>
     <td class="${cls(r.net + (unreal || 0))}"><b>${usd(r.net + (unreal || 0), true)}</b></td></tr>`;
   const body = summary.rows.map((r) => row(r, r.year === cur ? summary.totals.unrealized : null)).join('');
   $('#yearly-table').innerHTML = txns.length ? head + body + row(summary.totals, summary.totals.unrealized, 'Till date') : '';
+  renderYearDetail(pf);
 }
 
-function renderRealizedBySymbol({ pf }) {
+// Purchases and sales for one year, grouped by stock, so a surprising total can be traced.
+function renderYearDetail(pf) {
+  const el = $('#year-detail');
+  if (selectedYear == null) { el.innerHTML = ''; return; }
   const by = {};
-  for (const r of pf.realized) {
-    const x = (by[r.symbol] ||= { symbol: r.symbol, qty: 0, cost: 0, proceeds: 0, gain: 0 });
-    x.qty += r.quantity; x.cost += r.cost; x.proceeds += r.proceeds; x.gain += r.gain;
+  for (const b of pf.buys.filter((x) => x.year === selectedYear)) {
+    const x = (by[b.symbol] ||= { symbol: b.symbol, buys: 0, bought: 0, sells: 0, sold: 0 });
+    x.buys++; x.bought += b.amount;
   }
-  for (const i of pf.income) if (i.symbol) { (by[i.symbol] ||= { symbol: i.symbol, qty: 0, cost: 0, proceeds: 0, gain: 0 }).div = (by[i.symbol].div || 0) + i.amount; }
-  const rows = Object.values(by).sort((a, b) => (b.gain + (b.div || 0)) - (a.gain + (a.div || 0)));
-  const el = $('#realized-table');
-  if (!rows.length) { el.innerHTML = '<tr><td class="left">Nothing sold yet.</td></tr>'; return; }
-  el.innerHTML = '<tr><th>Stock</th><th>Shares sold</th><th>Cost</th><th>Proceeds</th><th>Realized gain</th><th>Dividends</th><th>Return</th></tr>' +
-    rows.map((r) => `<tr><td class="sym">${esc(r.symbol)}</td><td>${r.qty ? qty(r.qty) : '—'}</td><td>${r.qty ? usd(r.cost) : '—'}</td><td>${r.qty ? usd(r.proceeds) : '—'}</td>
-      <td class="${cls(r.gain)}">${r.qty ? usd(r.gain, true) : '—'}</td><td>${usd(r.div || 0)}</td><td class="${cls(r.gain)}">${r.cost ? pct(r.gain / r.cost) : '—'}</td></tr>`).join('');
+  const seen = new Set();
+  for (const r of pf.realized.filter((x) => x.year === selectedYear)) {
+    const x = (by[r.symbol] ||= { symbol: r.symbol, buys: 0, bought: 0, sells: 0, sold: 0 });
+    if (!seen.has(r.saleId)) { seen.add(r.saleId); x.sells++; }
+    x.sold += r.proceeds;
+  }
+  const rows = Object.values(by).sort((a, b) => b.bought - a.bought);
+  const tb = rows.reduce((s, r) => s + r.bought, 0), ts = rows.reduce((s, r) => s + r.sold, 0);
+  el.innerHTML = `<div class="detail">
+    <div class="card-head"><h3>${selectedYear}: what you bought and sold</h3><button class="btn ghost" data-close-year>Close</button></div>
+    <p class="sub">"Total purchases" adds up every buy. If you sell a stock and buy again with the same money, both buys count, so this can be much bigger than the cash you added. "Net new money" is closer to what you actually put in.</p>
+    <div class="table-wrap"><table class="data">
+      <tr><th>Stock</th><th>Buys</th><th>Bought</th><th>Sales</th><th>Sold</th><th>Net</th></tr>
+      ${rows.map((r) => `<tr><td class="sym">${esc(r.symbol)}</td><td>${r.buys || '—'}</td><td>${r.buys ? usd(r.bought) : '—'}</td>
+        <td>${r.sells || '—'}</td><td>${r.sells ? usd(r.sold) : '—'}</td><td>${usd(r.bought - r.sold)}</td></tr>`).join('')}
+      <tr class="total"><td>Total</td><td>${rows.reduce((s, r) => s + r.buys, 0)}</td><td>${usd(tb)}</td><td>${rows.reduce((s, r) => s + r.sells, 0)}</td><td>${usd(ts)}</td><td>${usd(tb - ts)}</td></tr>
+    </table></div></div>`;
 }
+$('#yearly-table').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-year]');
+  if (!tr) return;
+  const y = Number(tr.dataset.year);
+  selectedYear = selectedYear === y ? null : y;
+  renderYearly(derive());
+});
+$('#year-detail').addEventListener('click', (e) => {
+  if (e.target.closest('[data-close-year]')) { selectedYear = null; renderYearly(derive()); }
+});
+
+// ---------- stocks sold: one row per sale, filterable and sortable ----------
+const soldView = { sort: 'date', dir: -1, year: 'ALL', symbol: 'ALL' };
+function salesFrom(pf) {
+  const bySale = new Map();
+  for (const r of pf.realized) {
+    const s = bySale.get(r.saleId) || { id: r.saleId, date: r.date, year: r.year, symbol: r.symbol, quantity: 0, cost: 0, proceeds: 0, gain: 0, firstBuy: r.boughtDate, lastBuy: r.boughtDate, terms: new Set() };
+    s.quantity += r.quantity; s.cost += r.cost; s.proceeds += r.proceeds; s.gain += r.gain; s.terms.add(r.term);
+    if (r.boughtDate < s.firstBuy) s.firstBuy = r.boughtDate;
+    if (r.boughtDate > s.lastBuy) s.lastBuy = r.boughtDate;
+    bySale.set(r.saleId, s);
+  }
+  return [...bySale.values()].map((s) => ({ ...s, ret: s.cost ? s.gain / s.cost : 0, term: s.terms.size > 1 ? 'Mixed' : s.terms.has('long') ? 'Long' : 'Short' }));
+}
+function renderSold({ pf }) {
+  const all = salesFrom(pf);
+  const years = [...new Set(all.map((s) => s.year))].sort((a, b) => b - a);
+  const syms = [...new Set(all.map((s) => s.symbol))].sort();
+  $('#sold-year').innerHTML = '<option value="ALL">All years</option>' + years.map((y) => `<option>${y}</option>`).join('');
+  $('#sold-symbol').innerHTML = '<option value="ALL">All stocks</option>' + syms.map((s) => `<option>${esc(s)}</option>`).join('');
+  if (!years.map(String).includes(soldView.year)) soldView.year = 'ALL';
+  if (!syms.includes(soldView.symbol)) soldView.symbol = 'ALL';
+  $('#sold-year').value = soldView.year;
+  $('#sold-symbol').value = soldView.symbol;
+
+  const rows = all
+    .filter((s) => (soldView.year === 'ALL' || String(s.year) === soldView.year) && (soldView.symbol === 'ALL' || s.symbol === soldView.symbol))
+    .sort((a, b) => {
+      const k = soldView.sort;
+      const av = a[k], bv = b[k];
+      const c = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+      return (c || a.date.localeCompare(b.date)) * soldView.dir;
+    });
+  const el = $('#realized-table');
+  if (!all.length) { el.innerHTML = '<tr><td class="left">Nothing sold yet.</td></tr>'; return; }
+  const cols = [['date', 'Sold on', 'left'], ['symbol', 'Stock', 'left'], ['quantity', 'Shares'], ['firstBuy', 'Bought on', 'left'],
+    ['cost', 'Cost'], ['proceeds', 'Proceeds'], ['gain', 'Profit / loss'], ['ret', 'Return'], ['term', 'Term', 'left']];
+  const arrow = (k) => (soldView.sort === k ? (soldView.dir > 0 ? ' ▲' : ' ▼') : '');
+  const buyRange = (s) => (s.firstBuy === s.lastBuy ? s.firstBuy : `${s.firstBuy} – ${s.lastBuy}`);
+  const t = rows.reduce((a, s) => ({ cost: a.cost + s.cost, proceeds: a.proceeds + s.proceeds, gain: a.gain + s.gain }), { cost: 0, proceeds: 0, gain: 0 });
+  el.innerHTML = '<tr>' + cols.map(([k, label, align]) =>
+    `<th class="${align || ''}"><button class="sort" data-sort="${k}" aria-sort="${soldView.sort === k ? (soldView.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${arrow(k)}</button></th>`).join('') + '</tr>' +
+    rows.map((s) => `<tr><td class="left">${s.date}</td><td class="left sym">${esc(s.symbol)}</td><td>${qty(s.quantity)}</td><td class="left">${buyRange(s)}</td>
+      <td>${usd(s.cost)}</td><td>${usd(s.proceeds)}</td><td class="${cls(s.gain)}">${usd(s.gain, true)}</td><td class="${cls(s.gain)}">${pct(s.ret)}</td><td class="left">${s.term}</td></tr>`).join('') +
+    `<tr class="total"><td class="left">Total</td><td class="left">${rows.length} sale${rows.length === 1 ? '' : 's'}</td><td></td><td></td>
+      <td>${usd(t.cost)}</td><td>${usd(t.proceeds)}</td><td class="${cls(t.gain)}">${usd(t.gain, true)}</td><td class="${cls(t.gain)}">${t.cost ? pct(t.gain / t.cost) : '—'}</td><td></td></tr>`;
+}
+$('#realized-table').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sort]');
+  if (!b) return;
+  const k = b.dataset.sort;
+  if (soldView.sort === k) soldView.dir *= -1;
+  else { soldView.sort = k; soldView.dir = ['date', 'firstBuy', 'gain', 'ret', 'cost', 'proceeds', 'quantity'].includes(k) ? -1 : 1; }
+  renderSold(derive());
+});
+$('#sold-year').addEventListener('change', (e) => { soldView.year = e.target.value; renderSold(derive()); });
+$('#sold-symbol').addEventListener('change', (e) => { soldView.symbol = e.target.value; renderSold(derive()); });
 
 function renderHoldings({ valued, mood }) {
   $('#mood').innerHTML = `<div><div class="sub" style="margin:0">Market mood</div><div class="big">${moodLabel(mood)}</div></div>

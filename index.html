@@ -52,10 +52,18 @@
       <div class="card">
         <h2>Year-by-year breakdown</h2>
         <div class="table-wrap"><table id="yearly-table" class="data"></table></div>
-        <p class="sub small">Short-term = held one year or less (taxed as ordinary income). Long-term = held over a year. Figures use FIFO (first in, first out) cost basis, Chase's default. Check your 1099-B for tax filing.</p>
+        <div id="year-detail"></div>
+        <p class="sub small">Click a year to see what makes up its totals. Short-term = held one year or less (taxed as ordinary income). Long-term = held over a year. Figures use FIFO (first in, first out) cost basis, Chase's default. Check your 1099-B for tax filing.</p>
       </div>
       <div class="card">
-        <h2>Realized profit &amp; loss by stock (all time)</h2>
+        <div class="card-head">
+          <h2>Stocks sold</h2>
+          <div class="row">
+            <select id="sold-year" aria-label="Filter by year"></select>
+            <select id="sold-symbol" aria-label="Filter by stock"></select>
+          </div>
+        </div>
+        <p class="sub">One row per sale. Click a column heading to sort; click again to reverse.</p>
         <div class="table-wrap"><table id="realized-table" class="data"></table></div>
       </div>
     </section>

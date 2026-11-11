@@ -99,3 +99,23 @@ test('headline sentiment', () => {
   assert.ok(headlineSentiment(['Shares plunge after earnings miss']) < 0);
   assert.equal(headlineSentiment([]), null);
 });
+
+test('money-market sweep trades are treated as cash, not investments', () => {
+  const pf = computePortfolio([
+    { date: '2026-01-02', type: 'BUY', symbol: 'MGXX', quantity: 5000, price: 1, note: 'JPMORGAN US GOVERNMENT MONEY MARKET FUND' },
+    { date: '2026-01-03', type: 'SELL', symbol: 'MGXX', quantity: 5000, price: 1, note: 'JPMORGAN US GOVERNMENT MONEY MARKET FUND' },
+    { date: '2026-01-04', type: 'BUY', symbol: 'AAPL', quantity: 1, price: 200, note: 'APPLE INC' },
+  ]);
+  assert.equal(pf.buys.length, 1);
+  assert.equal(pf.realized.length, 0);
+  assert.equal(pf.cashLike.count, 2);
+});
+
+test('each realized lot remembers its sale and buy date', () => {
+  const pf = computePortfolio([
+    { id: 'b1', date: '2025-01-02', type: 'BUY', symbol: 'X', quantity: 1, price: 10 },
+    { id: 'b2', date: '2025-03-02', type: 'BUY', symbol: 'X', quantity: 1, price: 10 },
+    { id: 's1', date: '2025-05-02', type: 'SELL', symbol: 'X', quantity: 2, price: 12 },
+  ]);
+  assert.deepEqual(pf.realized.map((r) => [r.saleId, r.boughtDate]), [['s1', '2025-01-02'], ['s1', '2025-03-02']]);
+});

@@ -115,6 +115,14 @@ table.data tr.total td { font-weight: 650; border-top: 2px solid var(--axis); bo
 table.data td.note { white-space: normal; min-width: 280px; max-width: 420px; text-align: left; color: var(--ink-2); font-size: 13px; }
 .sym { font-weight: 650; }
 .sym small { display: block; color: var(--muted); font-weight: 400; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--surface-2); }
+tr.selected td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chev { color: var(--muted); }
+.detail { margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--page); }
+.detail h3 { margin: 0; font-size: 14px; }
+button.sort { border: 0; background: none; font: inherit; font-weight: 600; color: inherit; cursor: pointer; padding: 0; }
+button.sort:hover { color: var(--ink); text-decoration: underline; }
 .del { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; }
 .del:hover { color: var(--sell); }
 

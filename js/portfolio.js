@@ -2,6 +2,13 @@
 
 export const TYPES = ['BUY', 'SELL', 'DIVIDEND', 'INTEREST', 'FEE', 'SPLIT', 'DEPOSIT', 'WITHDRAWAL'];
 
+// Chase (and most brokers) park idle cash in a money-market "sweep" fund and log every
+// move in and out as a buy/sell. That's cash, not an investment, so it's left out.
+export const CASH_LIKE = /money\s*market|sweep|cash reserve|liquidity fund|government (cash|money)|treasury (plus|money|cash)|\bmmda\b|\bfdic\b|insured deposit|qacds/i;
+export function isCashLike(t) {
+  return ['BUY', 'SELL'].includes(t.type) && CASH_LIKE.test(`${t.note || ''} ${t.symbol || ''}`);
+}
+
 const round = (n, d = 2) => Math.round((n + Number.EPSILON) * 10 ** d) / 10 ** d;
 
 /** Clean up one transaction so the math below can trust it. */
@@ -42,9 +49,15 @@ export function computePortfolio(rawTxns) {
   const cashFlows = []; // deposits (+) / withdrawals (-)
   const buys = [];
   const warnings = [];
+  const cashLike = { count: 0, amount: 0 };
 
   for (const t of txns) {
     const year = Number(t.date.slice(0, 4));
+    if (isCashLike(t)) {
+      cashLike.count++;
+      if (t.type === 'BUY') cashLike.amount += t.amount ?? t.quantity * t.price;
+      continue;
+    }
     switch (t.type) {
       case 'BUY': {
         if (!t.symbol || !t.quantity) { warnings.push(`Skipped BUY on ${t.date}: missing symbol or quantity`); break; }
@@ -71,6 +84,7 @@ export function computePortfolio(rawTxns) {
           const proceeds = q * proceedsPerShare;
           const days = (Date.parse(t.date) - Date.parse(lot.date)) / 86400000;
           realized.push({
+            saleId: t.id, boughtDate: lot.date,
             date: t.date, year, symbol: t.symbol, quantity: q,
             cost, proceeds, gain: proceeds - cost,
             term: days > 365 ? 'long' : 'short',
@@ -117,7 +131,10 @@ export function computePortfolio(rawTxns) {
     .filter((p) => p.quantity > 1e-6)
     .sort((a, b) => b.cost - a.cost);
 
-  return { txns, positions, realized, income, fees, cashFlows, buys, warnings };
+  if (cashLike.count) {
+    warnings.push(`Left out ${cashLike.count} money-market / cash sweep transactions (${cashLike.amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} of sweep "buys"). That is idle cash moving in and out, not an investment.`);
+  }
+  return { txns, positions, realized, income, fees, cashFlows, buys, warnings, cashLike };
 }
 
 /** Attach live prices to positions. prices: {SYM: number} */
@@ -150,7 +167,7 @@ export function yearlySummary(pf, valued, today = new Date()) {
     const invested = sum(pf.buys);
     const proceeds = sum(pf.realized, 'proceeds');
     rows.push({
-      year: y, invested, proceeds, realizedGain, shortTerm, longTerm, income, fees,
+      year: y, invested, proceeds, netNew: invested - proceeds, realizedGain, shortTerm, longTerm, income, fees,
       net: realizedGain + income - fees,
     });
   }

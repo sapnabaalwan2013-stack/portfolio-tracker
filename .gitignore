@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+# Never commit your own exports or backups
+*-backup-*.json
+transactions-*.csv
+my-*.csv

@@ -1,0 +1,12 @@
+{
+  "name": "portfolio-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private in-browser tracker for a Chase Self-Directed Investing account.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "MIT"
+}

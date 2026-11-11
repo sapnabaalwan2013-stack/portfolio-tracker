@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio Tracker</title>
+  <meta name="description" content="Private, in-browser tracker for a Chase Self-Directed Investing account: P&L by year, ratings, news and market events.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232a78d6'/><path d='M7 22l6-7 5 4 7-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M7 22l6-7 5 4 7-9" stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Portfolio Tracker</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="dashboard" aria-selected="true">Dashboard</button>
+      <button role="tab" data-tab="holdings">Holdings &amp; ratings</button>
+      <button role="tab" data-tab="news">News</button>
+      <button role="tab" data-tab="calendar">Events</button>
+      <button role="tab" data-tab="transactions">Transactions</button>
+      <button role="tab" data-tab="settings">Settings</button>
+    </nav>
+    <div class="topbar-actions">
+      <span id="status" class="status" aria-live="polite"></span>
+      <button id="refresh" class="btn">Refresh prices</button>
+      <button id="theme" class="btn ghost" title="Toggle light/dark" aria-label="Toggle light/dark theme"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg></button>
+    </div>
+  </header>
+
+  <main>
+    <div id="banner"></div>
+
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tab-panel">
+      <div id="kpis" class="kpis"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Net profit &amp; loss by year</h2>
+          <p class="sub">Realized gains + dividends − fees, booked in the year you sold. The current year also shows open (unrealized) gains.</p>
+          <div class="chart-box"><canvas id="chart-yearly" aria-label="Net profit and loss by year"></canvas></div>
+        </div>
+        <div class="card">
+          <h2>Where your money is</h2>
+          <p class="sub">Current market value of each holding.</p>
+          <div class="chart-box"><canvas id="chart-alloc" aria-label="Holdings by market value"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Year-by-year breakdown</h2>
+        <div class="table-wrap"><table id="yearly-table" class="data"></table></div>
+        <p class="sub small">Short-term = held one year or less (taxed as ordinary income). Long-term = held over a year. Figures use FIFO (first in, first out) cost basis, Chase's default. Check your 1099-B for tax filing.</p>
+      </div>
+      <div class="card">
+        <h2>Realized profit &amp; loss by stock (all time)</h2>
+        <div class="table-wrap"><table id="realized-table" class="data"></table></div>
+      </div>
+    </section>
+
+    <!-- HOLDINGS -->
+    <section id="tab-holdings" class="tab-panel" hidden>
+      <div id="mood" class="card mood"></div>
+      <div class="card">
+        <h2>Your holdings</h2>
+        <p class="sub">Rating = analyst consensus (35%), 3–6 month momentum (25%), position in 52-week range (15%), news tone (15%) and overall market mood (10%). It's a screening aid, not financial advice.</p>
+        <div class="table-wrap"><table id="holdings-table" class="data stack"></table></div>
+      </div>
+    </section>
+
+    <!-- NEWS -->
+    <section id="tab-news" class="tab-panel" hidden>
+      <div class="news-filter">
+        <label for="news-symbol">Show</label>
+        <select id="news-symbol"></select>
+      </div>
+      <div id="news-list" class="news-list"></div>
+    </section>
+
+    <!-- CALENDAR -->
+    <section id="tab-calendar" class="tab-panel" hidden>
+      <div class="card">
+        <h2>Upcoming events</h2>
+        <p class="sub">Earnings dates for stocks you hold, plus the scheduled US jobs reports, CPI inflation reports and Fed rate decisions.</p>
+        <div id="event-list" class="event-list"></div>
+      </div>
+    </section>
+
+    <!-- TRANSACTIONS -->
+    <section id="tab-transactions" class="tab-panel" hidden>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Import from Chase</h2>
+          <ol class="steps">
+            <li>Sign in at chase.com and open your <b>Self-Directed Investing</b> account.</li>
+            <li>Go to <b>Activity</b> (or <b>Statements &amp; documents → Activity</b>), choose a date range starting from your first trade, and click <b>Download</b> as CSV.</li>
+            <li>Choose that file below. Columns are matched by name, so other brokers' CSVs work too.</li>
+          </ol>
+          <div class="row">
+            <label class="btn file">Choose CSV file<input id="csv-file" type="file" accept=".csv,text/csv" hidden></label>
+            <label class="check"><input id="csv-replace" type="checkbox"> Replace existing transactions</label>
+          </div>
+          <div id="import-result" class="sub"></div>
+        </div>
+        <div class="card">
+          <h2>Add a transaction</h2>
+          <form id="txn-form" class="form">
+            <label>Date<input name="date" type="date" required></label>
+            <label>Type
+              <select name="type">
+                <option>BUY</option><option>SELL</option><option>DIVIDEND</option><option>INTEREST</option>
+                <option>FEE</option><option>SPLIT</option><option>DEPOSIT</option><option>WITHDRAWAL</option>
+              </select>
+            </label>
+            <label>Ticker<input name="symbol" placeholder="AAPL" autocapitalize="characters"></label>
+            <label>Shares<input name="quantity" type="number" step="any" min="0"></label>
+            <label>Price / share<input name="price" type="number" step="any" min="0"></label>
+            <label>Fees<input name="fees" type="number" step="any" min="0" value="0"></label>
+            <label>Total amount <span class="hint">(dividends, deposits; optional for trades)</span><input name="amount" type="number" step="any" min="0"></label>
+            <button class="btn" type="submit">Add</button>
+          </form>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>All transactions <span id="txn-count" class="count"></span></h2>
+          <div class="row">
+            <button id="export-csv" class="btn ghost">Export CSV</button>
+            <button id="export-json" class="btn ghost">Back up (JSON)</button>
+            <label class="btn ghost file">Restore backup<input id="import-json" type="file" accept=".json,application/json" hidden></label>
+          </div>
+        </div>
+        <div id="warnings"></div>
+        <div class="table-wrap"><table id="txn-table" class="data"></table></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab-panel" hidden>
+      <div class="card narrow">
+        <h2>Market data key</h2>
+        <p class="sub">Live prices, ratings, news and earnings dates come from <a href="https://finnhub.io/register" target="_blank" rel="noopener">Finnhub</a>. Their free plan is enough. Your key is saved only in this browser and is never added to the GitHub repo.</p>
+        <form id="key-form" class="row">
+          <input id="api-key" type="password" placeholder="Paste your Finnhub API key" autocomplete="off" spellcheck="false">
+          <button class="btn" type="submit">Save</button>
+        </form>
+      </div>
+      <div class="card narrow">
+        <h2>Your data</h2>
+        <p class="sub">Transactions are stored in this browser only (localStorage). Nothing is uploaded. Use <b>Back up (JSON)</b> on the Transactions tab to move them to another computer.</p>
+        <div class="row">
+          <button id="load-sample" class="btn ghost">Load sample data</button>
+          <button id="clear-cache" class="btn ghost">Clear market-data cache</button>
+          <button id="clear-all" class="btn danger">Delete all my data</button>
+        </div>
+      </div>
+      <div class="card narrow">
+        <h2>Disclaimer</h2>
+        <p class="sub">Ratings and Buy/Hold/Sell notes are generated by simple rules from public data. They are not investment advice. Do your own research or talk to a licensed adviser before trading.</p>
+      </div>
+    </section>
+  </main>
+  <footer class="foot">Data stays in your browser · Market data by Finnhub · Not investment advice</footer>
+</body>
+</html>
